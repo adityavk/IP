@@ -42,8 +42,8 @@ def main(input_image):
         cv2.imshow('image',image)
         k = cv2.waitKey(0) & 0xFF
         if k == ord('r'):
-            image=clone1
-            img=clone2
+            image=clone1.copy()
+            img=clone2.copy()
         elif k == 13:
             break
 
@@ -64,9 +64,9 @@ def main(input_image):
     withBoundary = opened | img
     final = cv2.morphologyEx(withBoundary, cv2.MORPH_CLOSE, kernel)
 
-    # cv2.imshow('new',final)
-    # cv2.waitKey(0)
-    # cv2.destroyAllWindows()
+    cv2.imshow('new',final)
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
     return final
 
 if __name__ =="__main__":

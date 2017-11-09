@@ -1,7 +1,10 @@
+import sys
 import numpy as np
 import cv2
 import mouseInput
 import matplotlib.pyplot as plt
+import ctypes
+import time
 
 def gradients(source):
     global img, grad_x, grad_y
@@ -15,10 +18,25 @@ def gradients(source):
     return grad_x, grad_y
 
 def initialFillFront(target):
+    # global maskBoundary
     # LAPLACIAN_KERNEL = np.ones((3, 3), dtype = np.float32)
     # LAPLACIAN_KERNEL[1, 1] = -8
     maskBoundary = cv2.Laplacian(target.astype(np.float32),cv2.CV_32F)#,LAPLACIAN_KERNEL)
     return np.argwhere(maskBoundary>0)
+
+# def updateFillFront(fillFront, target, y, x):
+#     global img, halfsize, maskBoundary
+#     halfsize = (halfsize+2)
+#     left, right, top, bottom = patchSides((y, x), img.shape[0], img.shape[1])
+#     halfsize = (halfsize-2)
+#     # print(left, right, top, bottom)
+#     patch = target[top:(bottom+1), left:(right+1)].astype(np.float32)
+#     # print(patch)
+#     init = np.argwhere(maskBoundary[(top+1):bottom, (left+1):right] > 0) + [top+1, left+1]
+#     patchBoundaries = cv2.Laplacian(patch,cv2.CV_32F)
+#     maskBoundary[(top+1):bottom, (left+1):right] = patchBoundaries[1:-1,1:-1]
+#     final = np.argwhere(patchBoundaries) + [top+1, left+1]
+#     return np.array(list((set(map(tuple,fillFront)).difference(set(map(tuple,init)))).union(set(map(tuple,final)))))
 
 
 def normals(source, fillFront):
@@ -45,7 +63,7 @@ def patchSides(point, sizeY, sizeX):
     return left, right, top, bottom
 
 def patchConfidence(point, confidence, source):
-    left, right, top, bottom = patchSides(point, confidence.shape[1], confidence.shape[0])
+    left, right, top, bottom = patchSides(point, confidence.shape[0], confidence.shape[1])
     patch = confidence[top:(bottom+1), left:(right+1)]
     sourcePatch = source[top:(bottom+1), left:(right+1)]
     return (patch[sourcePatch==1]).sum()/(1.0*patch.size)
@@ -66,11 +84,14 @@ def maxPriorityPatch(fillFront, source, confidence):
 
 def bestPatch(targetPatchY, targetPatchX, source, confidence, target, iteration):
     global img, halfsize, grad_x, grad_y, disp
-
+    # print(targetPatchY,targetPatchX)
     height, width = img.shape[:2]
     left, right, top, bottom = patchSides((targetPatchY,targetPatchX), height, width)
     patchX = right - left + 1
     patchY = bottom - top + 1
+
+    if patchY==0 or patchX==0:
+        return
 
     targetPatch = img[top:(bottom+1), left:(right+1)]
     possiblePatches = []
@@ -81,45 +102,69 @@ def bestPatch(targetPatchY, targetPatchX, source, confidence, target, iteration)
             if np.count_nonzero(source_copy[row:(row+patchY), column:(column+patchX)]) == (patchX*patchY):
                 possiblePatches.append(img[row:(row+patchY), column:(column+patchX)])
                 locations.append((row,column))
-
-    possiblePatches = np.array(possiblePatches,dtype = float)
+    possiblePatches = np.array(possiblePatches,dtype = np.double)
     locations = np.array(locations)
-    # print(locations.shape,locations.dtype)
-    inSource = source[top:(bottom+1), left:(right+1)]
-    error = (((possiblePatches - targetPatch)**2)*np.dstack([inSource]*3)).sum(axis=(1,2,3))
-    # if iteration >=138 and iteration<150:
-        # print(targetPatch, inSource)
-        # print(error.shape, error.min())
-    minimas = np.argwhere(error == error.min())
-    # if iteration >=138 and iteration<150:
-        # print(minimas.shape)
-    minimas = minimas.reshape(minimas.shape[0],)
-    # if iteration >=138 and iteration<150:
-        # print(minimas.shape)
-    # print(locations[minimas].shape)
-
-    # print(minimas.shape)
-    variances = np.var(possiblePatches[minimas,:,:,:],axis=(1,2,3))
-    ind = minimas[np.argmin(variances)]
-    # print(ind)
-    bestPatch = possiblePatches[ind,:,:,:].astype(np.uint8)
-    # print(inSource.dtype)
-    # plt.imshow(img[top:(bottom+1), left:(right+1),::-1])
-    img[top:(bottom+1), left:(right+1)][~inSource] = bestPatch[~inSource]
-
-    # plt.figure()
-    # plt.imshow(inSource,cmap='gray')
-    # plt.figure()
-    # plt.imshow(bestPatch[:,:,::-1])
-    # plt.figure()
-    # plt.imshow(img[top:(bottom+1), left:(right+1),::-1])
+    # plt.plot(locations[:,1],locations[:,0],'x')
     # plt.show()
+    # print(locations.shape,locations.dtype)
+    inSource = source[top:(bottom+1), left:(right+1)].astype(np.bool)
+    tPatch = targetPatch.astype(np.double)
+    index = np.zeros((1,),dtype=np.int)
 
-    bestY, bestX = locations[ind]
-    # if iteration >=138 and iteration<150:
-        # print(iteration,':', bestY,bestX,np.dstack([inSource]*3).shape)
-        # plt.figure()
-        # plt.plot(locations[minimas,1],locations[minimas,0],'o')
+    lib = ctypes.cdll.LoadLibrary('./library.so')
+    fun = lib.cfun
+    # print(possiblePatches.dtype,possiblePatches.shape)
+    # print(possiblePatches.dtype,possiblePatches.shape)
+    # print(tPatch.dtype,tPatch.shape)
+    # print(inSource.dtype,inSource.shape)
+    # Here comes the fool part.
+    # fun(ctypes.c_void_p(indata.ctypes.data), ctypes.c_void_p(outdata.ctypes.data))
+    fun(ctypes.c_void_p(possiblePatches.ctypes.data), ctypes.c_int(possiblePatches.shape[0]), ctypes.c_int(possiblePatches.shape[1]),
+        ctypes.c_int(possiblePatches.shape[2]),ctypes.c_int(possiblePatches.shape[3]),
+        ctypes.c_void_p(tPatch.ctypes.data),ctypes.c_void_p(inSource.ctypes.data),ctypes.c_void_p(index.ctypes.data))
+    # print ('indata: %s' % indata)
+    # print ('outdata: %s' % outdata)
+    # print ('index: %s' % index[0])
+
+    # print(locations[index])
+    # if iteration==86:
+    #     plt.figure()
+    #     plt.imshow(img[top:(bottom+1), left:(right+1),::-1])
+    #
+    # error = (((possiblePatches - targetPatch)**2)*np.dstack([inSource]*3)).sum(axis=(1,2,3))
+    # # if iteration >=138 and iteration<150:
+    # #     print(targetPatch, inSource)
+    # #     print(error.shape, error.min())
+    # minimas = np.argwhere(error == error.min())
+    # # if iteration ==86 :
+    # #     print(minimas.shape)
+    # minimas = minimas.reshape(minimas.shape[0],)
+    # # if iteration ==86:
+    # #     print(minimas.shape)
+    # # print(locations[minimas].shape)
+    #
+    # # print(minimas.shape)
+    # variances = np.var(possiblePatches[minimas,:,:,:],axis=(1,2,3))
+    # ind = minimas[np.argmin(variances)]
+    # # print(ind)
+    bestPatch = possiblePatches[index[0],:,:,:].astype(np.uint8)
+    # # print(inSource.dtype)
+    img[top:(bottom+1), left:(right+1)][~inSource] = bestPatch[~inSource]
+    # # if iteration==86:
+    # #     plt.figure()
+    # #     plt.imshow(inSource,cmap='gray')
+    # #     plt.figure()
+    # #     plt.imshow(bestPatch[:,:,::-1])
+    # #     plt.figure()
+    # #     plt.imshow(img[top:(bottom+1), left:(right+1),::-1])
+    # print(ind)
+    bestY, bestX = locations[index[0]]
+    # print(bestY, bestX)
+    # if iteration ==86:
+    #     print(iteration,':', bestY,bestX,np.dstack([inSource]*3).shape)
+    #     plt.figure()
+    #     plt.plot(locations[minimas,1],locations[minimas,0],'o')
+    #     plt.show()
         # plt.show()
     # print(confidence[top:(bottom+1), left:(right+1)])
     confidence[top:(bottom+1), left:(right+1)][~inSource] = confidence[targetPatchY,targetPatchX]
@@ -132,15 +177,15 @@ def bestPatch(targetPatchY, targetPatchX, source, confidence, target, iteration)
     cv2.rectangle(disp,(bestX,bestY),(bestX+patchX,bestY+patchY),(0,0,255),1)
     # return target
 
-def main():
+def main(size):
     global halfsize, img, mask, grad_x, grad_y, disp, source_copy
-    image = cv2.imread('tests/image2.jpg')
+    image = cv2.imread('tests/image1.jpg')
     img = image.copy()
 
 
-    halfsize = 4
+    halfsize = size
 
-    original_mask = mouseInput.main(image) #cv2.imread('tests/mask2.jpg',0)
+    original_mask = cv2.imread('tests/mask1.jpg',0) #mouseInput.main(image) #
     mask = original_mask.copy()
 
     mask[mask<10]=0
@@ -148,7 +193,7 @@ def main():
     # cv2.waitKey(0)
     # cv2.destroyAllWindows()
     #
-    cv2.imwrite('mask.jpg',mask)
+    # cv2.imwrite('mask.jpg',mask)
     #
     confidence = np.ones_like(mask)
     confidence[mask > 10] = 0
@@ -160,28 +205,30 @@ def main():
 
     confidence = confidence.astype(float)
     # plt.imshow(confidence,cmap='gray')
-
+    plt.close('all')
     gradients(source)
     fillFront = initialFillFront(target)
     iterations = 0
     while fillFront.shape[0]>0:
-        # print(iterations)
+        # print(iterations,fillFront.shape)
         iterations += 1
 
         disp = img.copy()
 
         y, x = maxPriorityPatch(fillFront, source, confidence)
 
+        tt=time.time()
         bestPatch(y, x, source, confidence, target, iterations)
-
-        cv2.rectangle(disp,(x-4,y-4),(x+4,y+4),(255,0,0),1)
+        print(time.time()-tt)
+        cv2.rectangle(disp,(x-halfsize,y-halfsize),(x+halfsize,y+halfsize),(255,0,0),1)
         if iterations:# >=135 and iterations<=150:
             plt.figure()
             plt.imshow(disp[:,:,::-1])
-            plt.savefig('out3/'+str(iterations)+'.jpg')
-        fillFront = initialFillFront(target)
+            plt.savefig('out8/'+str(iterations)+'.jpg')
+            plt.close()
+        fillFront = initialFillFront(target)#(fillFront,target,y,x)
     # plt.show()
-    cv2.imwrite('final4.jpg',img)
+    cv2.imwrite('final7.jpg',img)
 
 if __name__ == "__main__":
-    main()
+    main(int(sys.argv[1]))
