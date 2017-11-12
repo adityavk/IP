@@ -49,24 +49,40 @@ def main(input_image):
 
     cv2.destroyAllWindows()
 
+    # cv2.imshow('new',img)
+    # cv2.waitKey(0)
+    # cv2.destroyAllWindows()
+
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE,(11,11))
 
     closed = cv2.morphologyEx(img, cv2.MORPH_CLOSE, kernel)
+
+    # cv2.imshow('new',img)
+    # cv2.waitKey(0)
+    # cv2.destroyAllWindows()
+
     h, w = img.shape[:2]
     mask = np.zeros((h+2, w+2), np.uint8)
-    seed_pt = (0,0)
+    # seed_pt =
     connectivity = 8
     flooded = closed.copy()
-    cv2.floodFill(flooded, mask, (10,10), (255,255,255))
+    # cv2.floodFill(flooded, mask, (w-1,h-1), (255,255,255))
+    # cv2.imshow('new',flooded)
+    # cv2.waitKey(0)
+    # cv2.destroyAllWindows()
+    cv2.floodFill(flooded, mask, (0,0), (255,255,255))
+    # cv2.imshow('new',flooded)
+    # cv2.waitKey(0)
+    # cv2.destroyAllWindows()
     invert = 255-flooded
     # kernel2 = cv2.getStructuringElement(cv2.MORPH_ELLIPSE,(11,11))
     opened = cv2.morphologyEx(invert, cv2.MORPH_OPEN, kernel)
     withBoundary = opened | img
     final = cv2.morphologyEx(withBoundary, cv2.MORPH_CLOSE, kernel)
+    cv2.imwrite('report/mask2.jpg',final)
+    # cv2.waitKey(0)
+    # cv2.destroyAllWindows()
 
-    cv2.imshow('new',final)
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
     return final
 
 if __name__ =="__main__":
