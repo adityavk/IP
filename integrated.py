@@ -4,12 +4,11 @@ from PIL import ImageTk, Image
 import numpy as np
 import cv2
 import inpainting
-import cleaned_eye
+import red_eye
 
 name=''
 
 def resize_dimensions(shape):
-	# print(shape)
 	h,w = shape[:2]
 	if h >= w:
 		return (int((canvas_width*w)/(1.0*h)),canvas_width)
@@ -47,7 +46,7 @@ def redeye():
 	if img is None:
 		return
 	img = cv2.resize(img,resize_dimensions(img.shape))
-	output(cleaned_eye.main(img))
+	output(red_eye.main(img))
 
 def inpaint():
 	global name
